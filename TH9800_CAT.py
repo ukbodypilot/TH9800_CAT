@@ -3,7 +3,7 @@ from TH9800_Enums import *
 from time import sleep
 import dearpygui.dearpygui as dpg
 import serial.tools.list_ports,serial_asyncio,asyncio,threading
-import logging,datetime,argparse,platform,ctypes,re,os
+import logging,datetime,argparse,platform,ctypes,re,os,sys
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -823,7 +823,7 @@ class SerialPacket:
                         if self.radio.dpg_enabled == True:
                             dpg.set_value(f"ch_{str(self.radio.vfo_active_processing).lower()}_display",radio_channel)
                             dpg.set_value(f"vfo_{str(self.radio.vfo_active_processing).lower()}_display",radio_text)
-                    case (0x40|0xC0):
+                    case 0x40 | 0xC0:
                         if self.radio.vfo_change == True:
                             return
                         elif self.radio.menu_open == True and self.radio.vfo_active_processing == self.radio.vfo_memory['vfo_active'] and self.radio.connect_process == False:
@@ -1041,7 +1041,7 @@ class SerialPacket:
             enabled_icons = [name for bit, name in icon_map.items() if icon_byte & bit]
             disabled_icons = [name for bit, name in icon_map.items() if not icon_byte & bit]
             if "L" in disabled_icons and "M" in disabled_icons:
-                enabled_icons += "H"
+                enabled_icons += ["H"]
             for icon in enabled_icons:
                 self.radio.set_icon(vfo=vfo,icon=RADIO_RX_ICON[f"{icon}"],value=True)
             for icon in disabled_icons:
@@ -2062,7 +2062,7 @@ async def main():
     if args.server_port:
         if int(args.server_port) < 1024 and is_user_admin == False and platform.system() == "Linux":
             print("Ports below 1024 require admin privileges")
-            exit
+            exit()
 
     if args.start_server:
         if args.comport and args.baudrate:
