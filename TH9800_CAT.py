@@ -621,6 +621,8 @@ class SerialProtocol(asyncio.Protocol):
         self.transmit_queue = asyncio.Queue()
         self.buffer = bytearray()
         self.radio = radio
+        self._read_task = None
+        self._write_task = None
 
     def set_rts(self, state: bool):
         if TCP.tcpclient_ready == True:
@@ -734,12 +736,35 @@ class SerialProtocol(asyncio.Protocol):
                 # Optionally: log, raise alert, or resync buffer here
 
     def connection_lost(self, exc):
-        print("Connection lost")
-        asyncio.get_event_loop().stop()
-        self.transport.close()
+        if exc:
+            print(f"Connection lost: {exc}")
+        else:
+            print("Connection closed")
+        # Explicitly lower RTS/DTR so the radio sees a clean disconnect
+        try:
+            self.transport.serial.rts = False
+            self.transport.serial.dtr = False
+        except:
+            pass
+        self.ready.clear()
+        # Cancel read/write loop tasks if they exist
+        if hasattr(self, '_read_task') and self._read_task and not self._read_task.done():
+            self._read_task.cancel()
+        if hasattr(self, '_write_task') and self._write_task and not self._write_task.done():
+            self._write_task.cancel()
+        # Update UI to reflect disconnected state
+        if self.radio.dpg_enabled:
+            try:
+                dpg.configure_item("connect_button", label="Connect")
+                dpg.configure_item("dtr_button", show=False)
+                dpg.configure_item("rts_button", show=False)
+                dpg.configure_item("rts_text", show=False)
+                dpg.configure_item("rts_label", show=False)
+            except:
+                pass  # UI items may not exist yet
 
     def send_packet(self, data: bytes):
-        if self.transport and not self.transport.is_closing() or TCP.tcpclient_ready == True:
+        if (self.transport and not self.transport.is_closing()) or TCP.tcpclient_ready == True:
             printd(f"Sending: {data.hex().upper()}")
             self.transmit_queue.put_nowait(data)
             #self.transport.write(data)
@@ -1449,7 +1474,8 @@ def refresh_comports_callback(sender, app_data, user_data):
     dpg.configure_item("comport", default_value=ports[0] if available_ports else "")
 
 def cancel_callback(sender, app_data, user_data):
-    dpg.configure_item(user_data, show=False)
+    modal_id = user_data[0] if isinstance(user_data, tuple) else user_data
+    dpg.delete_item(modal_id)
 
 def dpg_notification_window(title, message):
     with dpg.window(label=title, modal=True, no_close=True, pos=[22, 100]) as modal_id:
@@ -1573,8 +1599,8 @@ async def connect_serial_async(protocol, comport, baudrate):
             dpg.configure_item("radio_window", show=True)
             dpg.configure_item("connection_window", collapsed=True)
             dpg.configure_item("connect_button", label="Disconnect")
-        asyncio.create_task(read_loop(protocol))
-        asyncio.create_task(write_loop(protocol))
+        protocol._read_task = asyncio.create_task(read_loop(protocol))
+        protocol._write_task = asyncio.create_task(write_loop(protocol))
         if TCP.tcpclient_ready == False:
             radio.connect_process = True
 
@@ -1623,7 +1649,29 @@ def port_selected_callback(sender, app_data, user_data):
     baudrate = dpg.get_value("baud_rate")
     
     if label == "Disconnect":
+        # Cancel read/write loops before closing transport
+        if protocol._read_task and not protocol._read_task.done():
+            protocol._read_task.cancel()
+        if protocol._write_task and not protocol._write_task.done():
+            protocol._write_task.cancel()
+        protocol._read_task = None
+        protocol._write_task = None
+        # Explicitly lower RTS/DTR before closing so the radio sees a clean disconnect
+        try:
+            protocol.transport.serial.rts = False
+            protocol.transport.serial.dtr = False
+        except:
+            pass
         protocol.transport.close()
+        protocol.ready.clear()
+        # Drain any stale data from queues
+        while not protocol.receive_queue.empty():
+            try: protocol.receive_queue.get_nowait()
+            except: break
+        while not protocol.transmit_queue.empty():
+            try: protocol.transmit_queue.get_nowait()
+            except: break
+        protocol.buffer.clear()
         print(f"{comport} disconnected.\n")
         dpg.configure_item("connect_button", label="Connect")
         dpg.configure_item("dtr_button", show=False)
@@ -1643,8 +1691,8 @@ def port_selected_callback(sender, app_data, user_data):
     
     if not loop.is_running():
         threading.Thread(target=start_event_loop, daemon=True).start()
-        protocol.reset_ready()
-    
+    protocol.reset_ready()
+
     asyncio.run_coroutine_threadsafe(
         connect_serial_async(protocol, comport, baudrate),
         loop
@@ -1657,38 +1705,56 @@ async def run_dpg():
 
 async def read_loop(protocol: SerialProtocol):
     global TCP
-    while True:
-        packet = await protocol.receive_queue.get()
-        
-        if TCP.tcpserver_ready == True and TCP.tcpserver != None:
-            TCP.tcpserver.write(packet+b'\n')
-            await TCP.tcpserver.drain()
-            packet_processor = SerialPacket(protocol=protocol).process_rx_packet(packet=packet)
-        else:
-            packet_processor = SerialPacket(protocol=protocol).process_rx_packet(packet=packet)
+    try:
+        while True:
+            packet = await protocol.receive_queue.get()
+
+            if TCP.tcpserver_ready == True and TCP.tcpserver != None:
+                TCP.tcpserver.write(packet+b'\n')
+                await TCP.tcpserver.drain()
+                packet_processor = SerialPacket(protocol=protocol).process_rx_packet(packet=packet)
+            else:
+                packet_processor = SerialPacket(protocol=protocol).process_rx_packet(packet=packet)
+    except asyncio.CancelledError:
+        printd("Read loop cancelled")
+    except Exception as e:
+        print(f"Read loop error: {e}")
 
 async def write_loop(protocol: SerialProtocol):
     global TCP
 
-    while True:
-        if TCP.tcpclient_ready == True and TCP.tcpclient != None:
-            try:
-                data = await asyncio.wait_for(protocol.transmit_queue.get(), timeout=.10)
-                printd(f"Send pkt tcp: {data}:{type(data)}")
-                TCP.tcpclient.write(data+b'\n')
-                await TCP.tcpclient.drain()
-                if data.hex().find("aafd0c84ffffffff") == -1: #If match sq/vol cmd skip sleep
-                    await asyncio.sleep(0.15)
-            except:
-                None
-        else:
-            try:
-                data = await asyncio.wait_for(protocol.transmit_queue.get(), timeout=.10) #FIX FOR LINUX FREEZES ON TRANSMIT (Old: #data = await protocol.transmit_queue.get())
-                protocol.transport.write(data)
-                if data.hex().find("aafd0c84ffffffff") == -1: #If match sq/vol cmd skip sleep
-                    await asyncio.sleep(0.15)
-            except:
-                None
+    try:
+        while True:
+            if TCP.tcpclient_ready == True and TCP.tcpclient != None:
+                try:
+                    data = await asyncio.wait_for(protocol.transmit_queue.get(), timeout=.10)
+                    printd(f"Send pkt tcp: {data}:{type(data)}")
+                    TCP.tcpclient.write(data+b'\n')
+                    await TCP.tcpclient.drain()
+                    if data.hex().find("aafd0c84ffffffff") == -1: #If match sq/vol cmd skip sleep
+                        await asyncio.sleep(0.15)
+                except asyncio.TimeoutError:
+                    pass  # Normal timeout, no data to send
+                except (ConnectionError, OSError) as e:
+                    print(f"Write loop TCP error: {e}")
+                    break
+            else:
+                try:
+                    data = await asyncio.wait_for(protocol.transmit_queue.get(), timeout=.10) #FIX FOR LINUX FREEZES ON TRANSMIT (Old: #data = await protocol.transmit_queue.get())
+                    if protocol.transport and not protocol.transport.is_closing():
+                        protocol.transport.write(data)
+                    else:
+                        print("Write loop: transport closed, stopping")
+                        break
+                    if data.hex().find("aafd0c84ffffffff") == -1: #If match sq/vol cmd skip sleep
+                        await asyncio.sleep(0.15)
+                except asyncio.TimeoutError:
+                    pass  # Normal timeout, no data to send
+                except (ConnectionError, OSError, serial.SerialException) as e:
+                    print(f"Write loop serial error: {e}")
+                    break
+    except asyncio.CancelledError:
+        printd("Write loop cancelled")
 
 def handle_key_press(sender, app_data):
     global protocol
@@ -2114,6 +2180,12 @@ async def main():
         pass
     finally:
         if protocol.transport != None:
+            # Explicitly lower RTS/DTR before closing so the radio sees a clean disconnect
+            try:
+                protocol.transport.serial.rts = False
+                protocol.transport.serial.dtr = False
+            except:
+                pass
             protocol.transport.close()
         if radio.dpg_enabled == True:
             dpg.destroy_context()
