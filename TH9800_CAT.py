@@ -14,6 +14,49 @@ protocol = None
 read_loop_future = None
 write_loop_future = None
 
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.txt")
+CONFIG_DEFAULTS = {
+    "baud_rate": "19200",
+    "device": "FT232R USB UART",
+    "host": "",
+    "port": "",
+    "password": "",
+}
+
+def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        save_config(CONFIG_DEFAULTS)
+        return dict(CONFIG_DEFAULTS)
+    settings = dict(CONFIG_DEFAULTS)
+    with open(CONFIG_PATH, "r") as f:
+        for line in f:
+            line = line.strip()
+            if "=" in line:
+                key, _, value = line.partition("=")
+                key = key.strip()
+                if key in settings:
+                    settings[key] = value.strip()
+    return settings
+
+def save_config(settings):
+    with open(CONFIG_PATH, "w") as f:
+        for key in CONFIG_DEFAULTS:
+            f.write(f"{key}={settings.get(key, '')}\n")
+
+def save_current_settings():
+    comport = dpg.get_value("comport")
+    device = ""
+    if comport and ": " in comport:
+        device = comport.split(": ", 1)[1]
+    settings = {
+        "baud_rate": dpg.get_value("baud_rate"),
+        "device": device,
+        "host": dpg.get_value("tcp_host_text"),
+        "port": dpg.get_value("tcp_port_text"),
+        "password": dpg.get_value("tcp_pass_text"),
+    }
+    save_config(settings)
+
 def printd(msg):
     if debug == True:
         print(msg)
@@ -1355,10 +1398,12 @@ def tcp_connect_callback(sender, app_data, user_data):
     password = dpg.get_value("tcp_pass_text")
     protocol = user_data['protocol']
     label = user_data['label']
-    
+
     if password == None:
         password = ""
-    
+
+    save_current_settings()
+
     if label == "Start Server":
         tag = "tcp_startserver_button"
         label = dpg.get_item_label(tag)
@@ -1574,9 +1619,9 @@ def vol_callback(sender, app_data, user_data):
     
     radio.set_volume(vfo=vfo,vol=app_data)
 
-async def connect_serial_async(protocol, comport, baudrate):
+async def connect_serial_async(protocol, comport, baudrate, auto_dismiss=False):
     global TCP
-    
+
     radio = protocol.radio
     transport = None
 
@@ -1613,16 +1658,19 @@ async def connect_serial_async(protocol, comport, baudrate):
         cat_controller = CATController(radio=radio)
         radio.cat = cat_controller
         rigctl_server = RigctlServer(cat_controller)
-        
+
         if radio.rigctl_server == True:
             dpg.configure_item("getstate_button", show=True)
             radio.get_freq(vfo=RADIO_VFO.LEFT)
             radio.get_freq(vfo=RADIO_VFO.RIGHT)
             await rigctl_server.start()
-        
+
         await asyncio.sleep(2)
         if radio.dpg_enabled == True:
-            dpg_notification_window(title="Radio Initialized", message="Radio connected and initialized successfully!")
+            with dpg.window(label="Radio Initialized", modal=True, no_close=True, pos=[22, 100]) as modal_id:
+                dpg.add_text(f"Connected to {comport} successfully!")
+            await asyncio.sleep(3)
+            dpg.delete_item(modal_id)
         else:
             print("Radio connected and initialized successfully!")
 
@@ -1630,8 +1678,8 @@ async def connect_serial_async(protocol, comport, baudrate):
     except Exception as e:
         print(f"Connection failed: {e}")
         if radio.dpg_enabled == True:
-            with dpg.window(label="Error", modal=True, no_close=True) as modal_id:
-                dpg.add_text(e, wrap=300)
+            with dpg.window(label="Connection Failed", modal=True, no_close=True) as modal_id:
+                dpg.add_text(f"Auto-connect to {comport} failed:\n{e}" if auto_dismiss else e, wrap=300)
                 dpg.add_button(label="Ok", width=75, user_data=(modal_id, True), callback=cancel_callback)
             dpg.set_item_pos(modal_id, [120, 100])
         return None
@@ -1689,6 +1737,8 @@ def port_selected_callback(sender, app_data, user_data):
         dpg.set_item_pos(modal_id, [120, 100])
         return
     
+    save_current_settings()
+
     if not loop.is_running():
         threading.Thread(target=start_event_loop, daemon=True).start()
     protocol.reset_ready()
@@ -2091,6 +2141,20 @@ def build_gui(protocol):
     with dpg.handler_registry():
         dpg.add_key_press_handler(callback=handle_key_press)
 
+    # Load persistent settings from config file
+    settings = load_config()
+    dpg.set_value("baud_rate", settings["baud_rate"])
+    dpg.set_value("tcp_host_text", settings["host"])
+    dpg.set_value("tcp_port_text", settings["port"])
+    dpg.set_value("tcp_pass_text", settings["password"])
+    # Match saved device description against available ports
+    device = settings["device"]
+    if device:
+        for p in ports:
+            if device in p:
+                dpg.set_value("comport", p)
+                break
+
 async def main():
     global TCP,debug,log,protocol,is_user_admin
     parser = argparse.ArgumentParser(description="Example Python app with command-line arguments.")
@@ -2170,6 +2234,19 @@ async def main():
         dpg.create_viewport(title="TYT TH9800 CAT Control", width=575, height=580, resizable=False)
         dpg.setup_dearpygui()
         dpg.show_viewport()
+
+        # Auto-connect to saved serial device if a valid port is selected
+        comport_value = dpg.get_value("comport")
+        if comport_value and ":" in comport_value:
+            auto_comport = comport_value[0:comport_value.index(":")]
+            auto_baudrate = dpg.get_value("baud_rate")
+            if not loop.is_running():
+                threading.Thread(target=start_event_loop, daemon=True).start()
+            protocol.reset_ready()
+            asyncio.run_coroutine_threadsafe(
+                connect_serial_async(protocol, auto_comport, auto_baudrate, auto_dismiss=True),
+                loop
+            )
 
     try:
         if radio.dpg_enabled == True:
