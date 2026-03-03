@@ -2154,6 +2154,7 @@ def build_gui(protocol):
             if device in p:
                 dpg.set_value("comport", p)
                 break
+    return device
 
 async def main():
     global TCP,debug,log,protocol,is_user_admin
@@ -2230,14 +2231,15 @@ async def main():
 
     if radio.dpg_enabled == True:
         dpg.create_context()
-        build_gui(protocol)
+        saved_device = build_gui(protocol)
         dpg.create_viewport(title="TYT TH9800 CAT Control", width=575, height=580, resizable=False)
         dpg.setup_dearpygui()
         dpg.show_viewport()
 
-        # Auto-connect to saved serial device if a valid port is selected
+        # Auto-connect only if a device was previously saved in config.
+        # A blank device field means first run or intentional reset — skip auto-connect.
         comport_value = dpg.get_value("comport")
-        if comport_value and ":" in comport_value:
+        if saved_device and comport_value and ":" in comport_value:
             auto_comport = comport_value[0:comport_value.index(":")]
             auto_baudrate = dpg.get_value("baud_rate")
             if not loop.is_running():
