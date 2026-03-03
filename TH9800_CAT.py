@@ -21,6 +21,7 @@ CONFIG_DEFAULTS = {
     "host": "",
     "port": "",
     "password": "",
+    "auto_start_server": "true",
 }
 
 def load_config():
@@ -44,18 +45,19 @@ def save_config(settings):
             f.write(f"{key}={settings.get(key, '')}\n")
 
 def save_current_settings():
+    existing = load_config()
     comport = dpg.get_value("comport")
     device = ""
     if comport and ": " in comport:
         device = comport.split(": ", 1)[1]
-    settings = {
+    existing.update({
         "baud_rate": dpg.get_value("baud_rate"),
         "device": device,
         "host": dpg.get_value("tcp_host_text"),
         "port": dpg.get_value("tcp_port_text"),
         "password": dpg.get_value("tcp_pass_text"),
-    }
-    save_config(settings)
+    })
+    save_config(existing)
 
 def printd(msg):
     if debug == True:
@@ -126,6 +128,18 @@ class TCP:
                 case "data":
                     protocol.send_packet(data=bytearray.fromhex(data))
                     return "data sent"
+                case "vol":
+                    # !vol LEFT 50 or !vol RIGHT 75
+                    parts = data.split() if data else []
+                    if len(parts) == 2:
+                        vfo_str = parts[0].upper()
+                        vol = int(parts[1])
+                        if vfo_str in ("LEFT", "L"):
+                            protocol.radio.set_volume(vfo=RADIO_VFO.LEFT, vol=vol)
+                        elif vfo_str in ("RIGHT", "R"):
+                            protocol.radio.set_volume(vfo=RADIO_VFO.RIGHT, vol=vol)
+                        return f"vol {vfo_str} {vol}"
+                    return "usage: !vol LEFT|RIGHT 0-100"
                 case "rts":
                     if data == None or data == "":
                         protocol.toggle_rts()
@@ -1677,9 +1691,11 @@ async def connect_serial_async(protocol, comport, baudrate, auto_dismiss=False):
         return transport
     except Exception as e:
         print(f"Connection failed: {e}")
-        if radio.dpg_enabled == True:
+        if auto_dismiss:
+            print(f"Auto-connect skipped: {comport} not available")
+        elif radio.dpg_enabled == True:
             with dpg.window(label="Connection Failed", modal=True, no_close=True) as modal_id:
-                dpg.add_text(f"Auto-connect to {comport} failed:\n{e}" if auto_dismiss else e, wrap=300)
+                dpg.add_text(e, wrap=300)
                 dpg.add_button(label="Ok", width=75, user_data=(modal_id, True), callback=cancel_callback)
             dpg.set_item_pos(modal_id, [120, 100])
         return None
@@ -2236,14 +2252,32 @@ async def main():
         dpg.setup_dearpygui()
         dpg.show_viewport()
 
-        # Auto-connect only if a device was previously saved in config.
-        # A blank device field means first run or intentional reset — skip auto-connect.
+        # Ensure event loop is running for auto-start features
+        if not loop.is_running():
+            threading.Thread(target=start_event_loop, daemon=True).start()
+
+        # Auto-start TCP server if configured
+        settings = load_config()
+        if settings.get("auto_start_server", "").lower() != "false":
+            tcp_host = dpg.get_value("tcp_host_text") or "0.0.0.0"
+            tcp_port = dpg.get_value("tcp_port_text") or "9800"
+            tcp_pass = dpg.get_value("tcp_pass_text") or ""
+            TCP.tcpserver_future = asyncio.run_coroutine_threadsafe(
+                TCP.start_tcp_server(host=tcp_host, port=tcp_port, password=tcp_pass, protocol=protocol),
+                loop
+            )
+            dpg.configure_item("tcp_startserver_button", label="Stop Server")
+            dpg.configure_item("tcp_connect_button", show=False)
+            dpg.configure_item("rts_button", show=True)
+            dpg.configure_item("dtr_button", show=True)
+            dpg.configure_item("rts_text", show=True)
+            dpg.configure_item("rts_label", show=True)
+
+        # Auto-connect to saved serial device if it's present
         comport_value = dpg.get_value("comport")
         if saved_device and comport_value and ":" in comport_value:
             auto_comport = comport_value[0:comport_value.index(":")]
             auto_baudrate = dpg.get_value("baud_rate")
-            if not loop.is_running():
-                threading.Thread(target=start_event_loop, daemon=True).start()
             protocol.reset_ready()
             asyncio.run_coroutine_threadsafe(
                 connect_serial_async(protocol, auto_comport, auto_baudrate, auto_dismiss=True),
