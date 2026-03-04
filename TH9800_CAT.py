@@ -251,7 +251,10 @@ class TCP:
 
                 writer.close()
                 if sys.platform != "win32": # On Windows, skip wait_closed entirely to avoid WinError 64
-                    await writer.wait_closed()
+                    try:
+                        await writer.wait_closed()
+                    except (ConnectionResetError, BrokenPipeError, OSError):
+                        pass
             except:
                 None
 
