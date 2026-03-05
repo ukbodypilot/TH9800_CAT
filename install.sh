@@ -18,17 +18,45 @@ fi
 PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 echo "Python version: $PY_VER"
 
+# ── Detect package manager ────────────────────────────────────────────────
+if command -v pacman &>/dev/null; then
+    PKG_MGR="pacman"
+elif command -v apt-get &>/dev/null; then
+    PKG_MGR="apt"
+else
+    PKG_MGR="unknown"
+fi
+
+pkg_installed() {
+    case "$PKG_MGR" in
+        pacman)  pacman -Qi "$1" &>/dev/null ;;
+        apt)     dpkg -s "$1" &>/dev/null 2>&1 ;;
+        *)       return 1 ;;
+    esac
+}
+
+pkg_install() {
+    case "$PKG_MGR" in
+        pacman)  sudo pacman -S --needed --noconfirm "$@" ;;
+        apt)     sudo apt-get install -y "$@" ;;
+        *)       echo "ERROR: No supported package manager found."; exit 1 ;;
+    esac
+}
+
 # ── 2. Ensure python3-venv is available, then create virtual environment ────
 echo ""
 echo "[1/4] Creating virtual environment at $VENV_DIR ..."
 
-# On Debian/Ubuntu, python3-venv and ensurepip ship in a separate package.
-# Always ensure it's installed — apt is a no-op if already present.
-if dpkg -s "python${PY_VER}-venv" &>/dev/null 2>&1; then
-    echo "  python${PY_VER}-venv already installed."
+if [ "$PKG_MGR" = "apt" ]; then
+    # On Debian/Ubuntu, python3-venv ships in a separate package.
+    if pkg_installed "python${PY_VER}-venv"; then
+        echo "  python${PY_VER}-venv already installed."
+    else
+        echo "  Installing python${PY_VER}-venv ..."
+        pkg_install "python${PY_VER}-venv"
+    fi
 else
-    echo "  Installing python${PY_VER}-venv ..."
-    sudo apt-get install -y "python${PY_VER}-venv"
+    echo "  venv is included with python3 on this distro."
 fi
 
 # Treat a venv with no pip binary as broken (e.g. from a failed prior run)
@@ -52,15 +80,22 @@ PYTHON="$VENV_DIR/bin/python"
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo ""
     echo "[2/4] Checking system dependencies for dearpygui ..."
+
+    if [ "$PKG_MGR" = "pacman" ]; then
+        SYS_PKGS=(glu mesa libxrandr libxinerama libxcursor libxi)
+    else
+        SYS_PKGS=(libglu1-mesa libgl1-mesa-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev)
+    fi
+
     MISSING_PKGS=()
-    for pkg in libglu1-mesa libgl1-mesa-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev; do
-        if ! dpkg -s "$pkg" &>/dev/null 2>&1; then
+    for pkg in "${SYS_PKGS[@]}"; do
+        if ! pkg_installed "$pkg"; then
             MISSING_PKGS+=("$pkg")
         fi
     done
     if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
         echo "  Installing missing system packages: ${MISSING_PKGS[*]}"
-        sudo apt-get install -y "${MISSING_PKGS[@]}"
+        pkg_install "${MISSING_PKGS[@]}"
     else
         echo "  All system dependencies already present."
     fi
@@ -101,10 +136,14 @@ install_dearpygui_from_source() {
     echo "  ARM detected ($ARCH) — building dearpygui from source."
     echo "  This may take several minutes on lower-end boards."
 
-    # Build deps (some may already be installed from step 2, apt is idempotent)
-    sudo apt-get install -y git cmake python3 python3-dev \
-        libglu1-mesa-dev libgl1-mesa-dev \
-        libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+    # Build deps
+    if [ "$PKG_MGR" = "pacman" ]; then
+        pkg_install git cmake python glu mesa libxrandr libxinerama libxcursor libxi
+    else
+        pkg_install git cmake python3 python3-dev \
+            libglu1-mesa-dev libgl1-mesa-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+    fi
 
     BUILD_TMP=$(mktemp -d)
     # Clean up build directory on exit regardless of success or failure
