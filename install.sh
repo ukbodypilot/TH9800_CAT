@@ -132,6 +132,26 @@ install_dearpygui_prebuilt() {
     fi
 }
 
+install_dearpygui_from_wheel() {
+    # Check for a cached local wheel before building from source.
+    # Looks in project dist/ and ~/dist/ for a matching platform wheel.
+    local wheel=""
+    for dir in "$SCRIPT_DIR/dist" "$HOME/dist"; do
+        if [ -d "$dir" ]; then
+            wheel=$(find "$dir" -name "dearpygui-*-$PLAT.whl" -print -quit 2>/dev/null)
+            [ -n "$wheel" ] && break
+        fi
+    done
+
+    if [ -n "$wheel" ]; then
+        echo "  Found cached wheel: $wheel"
+        "$PIP" install "$wheel"
+        echo "  dearpygui installed from cached wheel."
+        return 0
+    fi
+    return 1
+}
+
 install_dearpygui_from_source() {
     echo "  ARM detected ($ARCH) — building dearpygui from source."
     echo "  This may take several minutes on lower-end boards."
@@ -154,15 +174,13 @@ install_dearpygui_from_source() {
 
     cd "$BUILD_TMP/DearPyGui"
 
-    if [[ "$ARCH" == "armv7l" ]]; then
-        PLAT="linux_armv7l"
-    else
-        # aarch64 / arm64
-        PLAT="linux_aarch64"
-    fi
-
     # setup.py must be run as a script, not with -m
     "$PYTHON" setup.py bdist_wheel --plat-name "$PLAT" --dist-dir "$BUILD_TMP/dist"
+
+    # Cache the wheel in the project dist/ directory for future installs
+    mkdir -p "$SCRIPT_DIR/dist"
+    cp "$BUILD_TMP"/dist/dearpygui-*.whl "$SCRIPT_DIR/dist/"
+    echo "  Wheel cached in $SCRIPT_DIR/dist/"
 
     "$PIP" install "$BUILD_TMP"/dist/dearpygui-*.whl
 
@@ -173,14 +191,20 @@ install_dearpygui_from_source() {
 case "$ARCH" in
     x86_64|i686|amd64)
         # Prebuilt wheels are available for x86; try pinned version, fall back to latest.
+        PLAT="linux_x86_64"
         install_dearpygui_prebuilt
         ;;
-    armv7l|aarch64|arm64)
-        # No prebuilt ARM wheels exist on PyPI — source build is required.
-        install_dearpygui_from_source
+    armv7l)
+        PLAT="linux_armv7l"
+        install_dearpygui_from_wheel || install_dearpygui_from_source
+        ;;
+    aarch64|arm64)
+        PLAT="linux_aarch64"
+        install_dearpygui_from_wheel || install_dearpygui_from_source
         ;;
     *)
         echo "  Unknown architecture ($ARCH), attempting prebuilt install ..."
+        PLAT="unknown"
         install_dearpygui_prebuilt
         ;;
 esac
