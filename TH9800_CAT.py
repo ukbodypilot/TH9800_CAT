@@ -249,15 +249,11 @@ class TCP:
                 self.tcpserver_loggedin = False
                 self.tcpserver_login_count = 0
 
-                if writer.transport and not writer.transport.is_closing():
-                    writer.transport.abort()
-                else:
-                    writer.close()
-                    if sys.platform != "win32":
-                        try:
-                            await writer.wait_closed()
-                        except (ConnectionResetError, BrokenPipeError, OSError):
-                            pass
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (ConnectionResetError, BrokenPipeError, OSError):
+                    pass
             except:
                 None
 
