@@ -1926,7 +1926,6 @@ def build_gui(protocol):
             dpg.add_button(label="Single VFO", width=90, callback=button_callback, user_data={"label": "Single VFO", "protocol": protocol, "vfo": RADIO_VFO.NONE})
         dpg.add_spacer(height=5)
         dpg.add_separator()
-        dpg.add_spacer(height=3)
 
         # === PREF/SKIP Channel Icons ===
         with dpg.group(horizontal=True):
