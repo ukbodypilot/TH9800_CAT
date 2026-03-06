@@ -327,9 +327,13 @@ class TCP:
                                 case "True":
                                     dpg.set_value("rts_text", "USB Controlled")
                                     protocol.radio.set_dpg_theme(tag="rts_text",color="green")
+                                    dpg.set_value("fp_rts_text", "USB Controlled")
+                                    protocol.radio.set_dpg_theme(tag="fp_rts_text",color="green")
                                 case "False":
                                     dpg.set_value("rts_text", "Radio Controlled")
                                     protocol.radio.set_dpg_theme(tag="rts_text",color="red")
+                                    dpg.set_value("fp_rts_text", "Radio Controlled")
+                                    protocol.radio.set_dpg_theme(tag="fp_rts_text",color="red")
                         case "dtr":
                             match data:
                                 case "True":
@@ -695,9 +699,13 @@ class SerialProtocol(asyncio.Protocol):
             case True:
                 dpg.set_value("rts_text", "USB Controlled")
                 self.radio.set_dpg_theme(tag="rts_text",color="green")
+                dpg.set_value("fp_rts_text", "USB Controlled")
+                self.radio.set_dpg_theme(tag="fp_rts_text",color="green")
             case False:
                 dpg.set_value("rts_text", "Radio Controlled")
                 self.radio.set_dpg_theme(tag="rts_text",color="red")
+                dpg.set_value("fp_rts_text", "Radio Controlled")
+                self.radio.set_dpg_theme(tag="fp_rts_text",color="red")
 
     def toggle_rts(self):
         if TCP.tcpclient_ready == True:
@@ -712,9 +720,13 @@ class SerialProtocol(asyncio.Protocol):
             case True:
                 dpg.set_value("rts_text", "USB Controlled")
                 self.radio.set_dpg_theme(tag="rts_text",color="green")
+                dpg.set_value("fp_rts_text", "USB Controlled")
+                self.radio.set_dpg_theme(tag="fp_rts_text",color="green")
             case False:
                 dpg.set_value("rts_text", "Radio Controlled")
                 self.radio.set_dpg_theme(tag="rts_text",color="red")
+                dpg.set_value("fp_rts_text", "Radio Controlled")
+                self.radio.set_dpg_theme(tag="fp_rts_text",color="red")
 
     def set_dtr(self, state: bool):
         if TCP.tcpclient_ready == True:
@@ -819,6 +831,9 @@ class SerialProtocol(asyncio.Protocol):
                 dpg.configure_item("rts_button", show=False)
                 dpg.configure_item("rts_text", show=False)
                 dpg.configure_item("rts_label", show=False)
+                dpg.configure_item("fp_rts_button", show=False)
+                dpg.configure_item("fp_rts_text", show=False)
+                dpg.configure_item("fp_rts_label", show=False)
             except:
                 pass  # UI items may not exist yet
 
@@ -1433,10 +1448,14 @@ def tcp_connect_callback(sender, app_data, user_data):
             dpg.configure_item(tag, label="Stop Server")
             dpg.configure_item("rts_button", show=True)
             dpg.configure_item("dtr_button", show=True)
-            
+
             dpg.configure_item("rts_text", show=True)
             dpg.configure_item("rts_label", show=True)
-            
+
+            dpg.configure_item("fp_rts_button", show=True)
+            dpg.configure_item("fp_rts_text", show=True)
+            dpg.configure_item("fp_rts_label", show=True)
+
             dpg.configure_item("tcp_connect_button", show=False)
             dpg.configure_item(tag, show=True)
             dpg.configure_item("connection_window", collapsed=True)
@@ -1456,10 +1475,14 @@ def tcp_connect_callback(sender, app_data, user_data):
             dpg.configure_item("tcp_connect_button", label="Start Server")
             dpg.configure_item("rts_button", show=False)
             dpg.configure_item("dtr_button", show=False)
-            
+
             dpg.configure_item("rts_text", show=False)
             dpg.configure_item("rts_label", show=False)
-            
+
+            dpg.configure_item("fp_rts_button", show=False)
+            dpg.configure_item("fp_rts_text", show=False)
+            dpg.configure_item("fp_rts_label", show=False)
+
             dpg.configure_item("tcp_connect_button", show=True)
             dpg.configure_item("tcp_startserver_button", show=True)
     elif label == "Connect Host":
@@ -1484,10 +1507,14 @@ def tcp_connect_callback(sender, app_data, user_data):
             dpg.configure_item(tag, label="Disconnect Host")
             dpg.configure_item("rts_button", show=True)
             dpg.configure_item("dtr_button", show=True)
-            
+
             dpg.configure_item("rts_text", show=True)
             dpg.configure_item("rts_label", show=True)
-            
+
+            dpg.configure_item("fp_rts_button", show=True)
+            dpg.configure_item("fp_rts_text", show=True)
+            dpg.configure_item("fp_rts_label", show=True)
+
             dpg.configure_item(tag, show=True)
             dpg.configure_item("tcp_startserver_button", show=False)
             dpg.configure_item("connection_window", collapsed=True)
@@ -1505,12 +1532,16 @@ def tcp_connect_callback(sender, app_data, user_data):
             dpg.configure_item("tcp_connect_button", label="Connect Host")
             dpg.configure_item("rts_button", show=False)
             dpg.configure_item("dtr_button", show=False)
-            
+
             dpg.configure_item("rts_text", show=False)
             dpg.configure_item("rts_label", show=False)
-            
+
+            dpg.configure_item("fp_rts_button", show=False)
+            dpg.configure_item("fp_rts_text", show=False)
+            dpg.configure_item("fp_rts_label", show=False)
+
             dpg.configure_item("tcp_connect_button", show=True)
-            
+
             dpg.configure_item("tcp_startserver_button", show=True)
 
 def update_signal(radio: SerialRadio, vfo: RADIO_VFO, s_value: int):
@@ -1657,6 +1688,9 @@ async def connect_serial_async(protocol, comport, baudrate, auto_dismiss=False):
             dpg.configure_item("dtr_button", show=True)
             dpg.configure_item("rts_text", show=True)
             dpg.configure_item("rts_label", show=True)
+            dpg.configure_item("fp_rts_button", show=True)
+            dpg.configure_item("fp_rts_text", show=True)
+            dpg.configure_item("fp_rts_label", show=True)
             dpg.configure_item("radio_window", show=True)
             dpg.configure_item("connection_window", collapsed=True)
             dpg.configure_item("connect_button", label="Disconnect")
@@ -1744,6 +1778,9 @@ def port_selected_callback(sender, app_data, user_data):
         dpg.configure_item("rts_button", show=False)
         dpg.configure_item("rts_text", show=False)
         dpg.configure_item("rts_label", show=False)
+        dpg.configure_item("fp_rts_button", show=False)
+        dpg.configure_item("fp_rts_text", show=False)
+        dpg.configure_item("fp_rts_label", show=False)
         return
 
     try:
@@ -1870,6 +1907,14 @@ def build_gui(protocol):
         bold_font = dpg.add_font(bold_font_path, 18)
 
     with dpg.window(tag="radio_window", show=True, label="Radio Front Panel", width=580, height=530, pos=[0,20], no_move=True, no_resize=True, user_data={"protocol": protocol}):
+        # === RTS TX Control ===
+        with dpg.group(horizontal=True):
+            dpg.add_text("RTS TX: ", indent=5, tag="fp_rts_label", show=False)
+            dpg.add_text("USB Controlled", tag="fp_rts_text", show=False)
+            protocol.radio.set_dpg_theme(tag="fp_rts_text", color="green")
+            dpg.add_button(label="Toggle RTS", tag="fp_rts_button", show=False, indent=350, width=100, callback=button_callback, user_data={"label": "Toggle RTS", "protocol": protocol, "vfo": RADIO_VFO.NONE})
+        dpg.add_spacer(height=3)
+
         # === Hyper Mem Buttons A-F ===
         with dpg.group(horizontal=True):
             dpg.add_text("Hyper Memories: ", indent=15)
@@ -2274,6 +2319,9 @@ async def main():
             dpg.configure_item("dtr_button", show=True)
             dpg.configure_item("rts_text", show=True)
             dpg.configure_item("rts_label", show=True)
+            dpg.configure_item("fp_rts_button", show=True)
+            dpg.configure_item("fp_rts_text", show=True)
+            dpg.configure_item("fp_rts_label", show=True)
 
         # Auto-connect to saved serial device if it's present
         comport_value = dpg.get_value("comport")
