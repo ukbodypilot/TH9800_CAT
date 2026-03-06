@@ -1914,6 +1914,8 @@ def build_gui(protocol):
             protocol.radio.set_dpg_theme(tag="fp_rts_text", color="green")
             dpg.add_button(label="Toggle RTS", tag="fp_rts_button", show=False, indent=350, width=100, callback=button_callback, user_data={"label": "Toggle RTS", "protocol": protocol, "vfo": RADIO_VFO.NONE})
         dpg.add_spacer(height=3)
+        dpg.add_separator()
+        dpg.add_spacer(height=5)
 
         # === Hyper Mem Buttons A-F ===
         with dpg.group(horizontal=True):
