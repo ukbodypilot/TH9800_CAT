@@ -168,7 +168,7 @@ class TCP:
                 data = await reader.readline()
 
                 if not data:
-                    continue
+                    break  # connection closed
 
                 printd(f"Data RCVD: {type(data)} /// {data}")
                 data = data[0:-1] #Pull new line character off the end
@@ -283,10 +283,10 @@ class TCP:
         try:
             while True:
                 data = await reader.readline()
-                
+
                 if not data:
-                    continue
-                
+                    break  # connection closed
+
                 printd(f"Data RCVD: {type(data)} /// {data}")
                 data = data[0:-1] #Pull new line character off the end
                 
