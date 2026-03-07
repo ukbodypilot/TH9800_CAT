@@ -688,12 +688,32 @@ class SerialProtocol(asyncio.Protocol):
         self._read_task = None
         self._write_task = None
 
+    RTS_STATE_FILE = '/tmp/th9800_rts_state'
+
+    def _save_rts_state(self, state):
+        """Persist RTS state so it survives restarts."""
+        try:
+            with open(self.RTS_STATE_FILE, 'w') as f:
+                f.write('1' if state else '0')
+        except Exception:
+            pass
+
+    @staticmethod
+    def _load_rts_state():
+        """Load saved RTS state. Returns True (USB Controlled) if no saved state."""
+        try:
+            with open(SerialProtocol.RTS_STATE_FILE, 'r') as f:
+                return f.read().strip() == '1'
+        except Exception:
+            return True  # default: USB Controlled
+
     def set_rts(self, state: bool):
         if TCP.tcpclient_ready == True:
             protocol.transmit_queue.put_nowait(f"!rts {state}".encode())
         else:
             printd(f"RTS state: {self.transport.serial.rts} Setting to {state}")
             self.transport.serial.rts = state
+            self._save_rts_state(state)
         if self.radio.dpg_enabled == False:
             return
         match state:
@@ -715,6 +735,7 @@ class SerialProtocol(asyncio.Protocol):
         else:
             state = not self.transport.serial.rts  #Toggle state
             self.transport.serial.rts = state
+            self._save_rts_state(state)
         if self.radio.dpg_enabled == False:
             return
         match state:
@@ -812,9 +833,7 @@ class SerialProtocol(asyncio.Protocol):
             print(f"Connection lost: {exc}")
         else:
             print("Connection closed")
-        # Explicitly lower RTS/DTR so the radio sees a clean disconnect
         try:
-            self.transport.serial.rts = False
             self.transport.serial.dtr = False
         except:
             pass
@@ -1680,7 +1699,10 @@ async def connect_serial_async(protocol, comport, baudrate, auto_dismiss=False):
             )
             await protocol.ready.wait()
             protocol.set_dtr(True)
-            protocol.transport.serial.rts = False  # Don't force RTS on connect — let gateway control it
+            # Restore saved RTS state (persists across restarts)
+            saved_rts = SerialProtocol._load_rts_state()
+            protocol.transport.serial.rts = saved_rts
+            protocol.set_rts(saved_rts)  # update UI to match
             await asyncio.sleep(0.5)
 
         if radio.dpg_enabled == True:
@@ -1749,9 +1771,7 @@ def port_selected_callback(sender, app_data, user_data):
             protocol._write_task.cancel()
         protocol._read_task = None
         protocol._write_task = None
-        # Explicitly lower RTS/DTR before closing so the radio sees a clean disconnect
         try:
-            protocol.transport.serial.rts = False
             protocol.transport.serial.dtr = False
         except:
             pass
@@ -2337,9 +2357,7 @@ async def main():
         pass
     finally:
         if protocol.transport != None:
-            # Explicitly lower RTS/DTR before closing so the radio sees a clean disconnect
             try:
-                protocol.transport.serial.rts = False
                 protocol.transport.serial.dtr = False
             except:
                 pass
