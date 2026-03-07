@@ -144,13 +144,13 @@ class TCP:
                     if data == None or data == "":
                         protocol.toggle_rts()
                     else:
-                        protocol.set_rts(bool(data))
+                        protocol.set_rts(data.strip().lower() in ('true', '1', 'on'))
                     return str(protocol.transport.serial.rts)
                 case "dtr":
                     if data == None or data == "":
                         protocol.toggle_dtr()
                     else:
-                        protocol.set_dtr(bool(data))
+                        protocol.set_dtr(data.strip().lower() in ('true', '1', 'on'))
                     return str(protocol.transport.serial.dtr)
                 case "exit":
                     return "return"
