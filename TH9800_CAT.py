@@ -1680,9 +1680,8 @@ async def connect_serial_async(protocol, comport, baudrate, auto_dismiss=False):
             )
             await protocol.ready.wait()
             protocol.set_dtr(True)
+            protocol.transport.serial.rts = False  # Don't force RTS on connect — let gateway control it
             await asyncio.sleep(0.5)
-            printd(f"Connected to {comport} at {baudrate} baud.")
-            #protocol.set_rts(True) #Enable USB/CAT TX Control - removed: let gateway control RTS state
 
         if radio.dpg_enabled == True:
             dpg.configure_item("rts_button", show=True)
@@ -1717,13 +1716,6 @@ async def connect_serial_async(protocol, comport, baudrate, auto_dismiss=False):
             await rigctl_server.start()
 
         await asyncio.sleep(2)
-        if radio.dpg_enabled == True:
-            with dpg.window(label="Radio Initialized", modal=True, no_close=True, pos=[22, 100]) as modal_id:
-                dpg.add_text(f"Connected to {comport} successfully!")
-            await asyncio.sleep(3)
-            dpg.delete_item(modal_id)
-        else:
-            print("Radio connected and initialized successfully!")
 
         return transport
     except Exception as e:
