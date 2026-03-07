@@ -218,7 +218,8 @@ class TCP:
                         writer.write(f"{response2}\n".encode())
                         await writer.drain()
                         
-                        protocol.set_rts(True)
+                        # Don't change RTS on TCP client connect — let the radio
+                        # keep its current RTS state (Radio Controlled for AIOC PTT)
                         protocol.radio.connect_process = True
                         protocol.radio.exe_cmd(cmd=RADIO_TX_CMD.STARTUP)
                         await asyncio.sleep(0.5)
