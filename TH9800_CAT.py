@@ -1682,7 +1682,7 @@ async def connect_serial_async(protocol, comport, baudrate, auto_dismiss=False):
             protocol.set_dtr(True)
             await asyncio.sleep(0.5)
             printd(f"Connected to {comport} at {baudrate} baud.")
-            protocol.set_rts(True) #Enable USB/CAT TX Control
+            #protocol.set_rts(True) #Enable USB/CAT TX Control - removed: let gateway control RTS state
 
         if radio.dpg_enabled == True:
             dpg.configure_item("rts_button", show=True)
