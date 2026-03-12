@@ -2438,8 +2438,42 @@ async def main():
             print(f"TCP server ready — waiting for serial connect via web UI or TCP command")
             print(f"  Serial device: {args.comport} @ {args.baudrate}")
 
-            while True:
-                await asyncio.sleep(10)
+            # Register SIGTERM handler so systemd stop triggers clean shutdown
+            import signal
+            _shutdown_event = asyncio.Event()
+            def _sigterm_handler(signum, frame):
+                print("\nSIGTERM received — shutting down...")
+                loop.call_soon_threadsafe(_shutdown_event.set)
+            signal.signal(signal.SIGTERM, _sigterm_handler)
+            signal.signal(signal.SIGINT, _sigterm_handler)
+
+            try:
+                await _shutdown_event.wait()
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                pass
+            finally:
+                # Clean up serial connection
+                if protocol.transport and not protocol.transport.is_closing():
+                    print("  Closing serial port...")
+                    try:
+                        protocol.transport.serial.dtr = False
+                    except Exception:
+                        pass
+                    protocol.transport.close()
+                # Clean up TCP server
+                if TCP.tcpserver is not None:
+                    try:
+                        TCP.tcpserver.close()
+                    except Exception:
+                        pass
+                if TCP.tcpserver_server is not None:
+                    try:
+                        TCP.tcpserver_server.close()
+                    except Exception:
+                        pass
+                TCP.tcpserver_ready = False
+                print("  Headless server shut down cleanly.")
+            return  # Skip GUI path below
         else:
             print("A COM Port and Baud Rate are required to start the command line server!")
 
