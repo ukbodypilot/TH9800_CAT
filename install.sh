@@ -217,9 +217,54 @@ exec "\$(dirname "\${BASH_SOURCE[0]}")/venv/bin/python" TH9800_CAT.py "\$@"
 EOF
 chmod +x "$SCRIPT_DIR/run.sh"
 
+# ── Install systemd service ───────────────────────────────────────────────────
+echo ""
+echo "[5/5] Installing systemd service ..."
+
+SERVICE_FILE="/etc/systemd/system/th9800-cat.service"
+CURRENT_USER="$(whoami)"
+HEADLESS_SH="$SCRIPT_DIR/run-headless.sh"
+
+sudo tee "$SERVICE_FILE" > /dev/null << SVCEOF
+[Unit]
+Description=TH-9800 CAT Control Server (headless)
+After=network.target
+Before=radio-gateway.service
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+Group=$CURRENT_USER
+WorkingDirectory=$SCRIPT_DIR
+ExecStart=$HEADLESS_SH
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=th9800-cat
+
+# Serial port access
+SupplementaryGroups=uucp
+
+Environment=HOME=$HOME
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable th9800-cat.service
+echo "  Service installed and enabled: th9800-cat.service"
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Installation complete ==="
 echo ""
-echo "To run the app:"
-echo "  ./run.sh"
+echo "To run standalone:  ./run.sh"
+echo "As a service:       sudo systemctl start th9800-cat"
+echo "View logs:          journalctl -u th9800-cat -f"
