@@ -164,15 +164,18 @@ class TCP:
                 case "ptt":
                     if not (protocol.transport and not protocol.transport.is_closing()):
                         return "serial not connected"
-                    # !ptt — toggle PTT using the same logic as the GUI button
+                    # !ptt [on|off] — explicit key/unkey; bare !ptt toggles (legacy)
                     radio = protocol.radio
-                    if radio.mic_ptt == False:
-                        radio.mic_ptt = True
-                        radio.vfo_memory[radio.vfo_memory['vfo_active']]['ptt'] = 1
-                        radio.exe_cmd(cmd=RADIO_TX_CMD.MIC_PTT)
+                    action = (data or '').strip().lower()
+                    if action == 'on':
+                        desired = True
+                    elif action == 'off':
+                        desired = False
                     else:
-                        radio.mic_ptt = False
-                        radio.vfo_memory[radio.vfo_memory['vfo_active']]['ptt'] = 0
+                        desired = not radio.mic_ptt
+                    if desired != radio.mic_ptt:
+                        radio.mic_ptt = desired
+                        radio.vfo_memory[radio.vfo_memory['vfo_active']]['ptt'] = 1 if desired else 0
                         radio.exe_cmd(cmd=RADIO_TX_CMD.MIC_PTT)
                     return str(radio.mic_ptt)
                 case "dtr":
@@ -349,17 +352,9 @@ class TCP:
                     elif response2 == "Login Successful":
                         writer.write(f"{response2}\n".encode())
                         await writer.drain()
-
-                        # Only run startup sequence if serial is NOT already connected
-                        # (headless mode already ran it — running it again creates a
-                        # command storm that overwhelms the radio's serial interface)
-                        if not (protocol.transport and not protocol.transport.is_closing()):
-                            protocol.radio.connect_process = True
-                            protocol.radio.exe_cmd(cmd=RADIO_TX_CMD.STARTUP)
-                            await asyncio.sleep(3)
-                        else:
-                            print("Serial already connected, skipping post-login startup")
-
+                        # Do NOT send STARTUP here — the !serial connect handler owns
+                        # the STARTUP sequence. Sending it here too causes a double-STARTUP
+                        # that overwhelms the radio (RIGHT VFO goes dead).
                         continue
                     else:
                         response += response2
