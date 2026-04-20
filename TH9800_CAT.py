@@ -2415,17 +2415,18 @@ async def main():
             radio.dpg_enabled = False
             print("\nStarting command line server...")
 
-            if not loop.is_running():
-                threading.Thread(target=start_event_loop, daemon=True).start()
-                protocol.reset_ready()
-
-            TCP.tcpserver_future = asyncio.run_coroutine_threadsafe(
-                TCP.start_tcp_server(host=args.server_host_ip, port=args.server_port, password=password, protocol=protocol),
-                loop
-            )
+            # Single-loop headless: main() runs on the module-level `loop`
+            # (see __main__), so the TCP server, shutdown event, and serial
+            # callbacks all share one event loop. Earlier versions spun a
+            # second loop via asyncio.run() which meant the signal handler
+            # set the event on the wrong loop — shutdown hung until SIGKILL.
+            tcp_task = asyncio.create_task(
+                TCP.start_tcp_server(
+                    host=args.server_host_ip, port=args.server_port,
+                    password=password, protocol=protocol))
 
             while TCP.tcpserver_ready == False:
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.1)
 
             # Don't connect serial automatically — let the user connect
             # via the web UI "Connect" button (avoids STARTUP command storm
@@ -2433,21 +2434,18 @@ async def main():
             print(f"TCP server ready — waiting for serial connect via web UI or TCP command")
             print(f"  Serial device: {args.comport} @ {args.baudrate}")
 
-            # Register SIGTERM handler so systemd stop triggers clean shutdown
-            import signal
-            _shutdown_event = asyncio.Event()
-            def _sigterm_handler(signum, frame):
-                print("\nSIGTERM received — shutting down...")
-                loop.call_soon_threadsafe(_shutdown_event.set)
-            signal.signal(signal.SIGTERM, _sigterm_handler)
-            signal.signal(signal.SIGINT, _sigterm_handler)
+            # The shutdown Event lives on this (module) loop. The POSIX signal
+            # handler is installed in __main__ on the main thread (add_signal_handler
+            # can't be used here — main() runs on the loop's background thread) and
+            # wakes us via loop.call_soon_threadsafe(_shutdown_event.set).
+            global _headless_shutdown_event
+            _headless_shutdown_event = asyncio.Event()
 
             try:
-                await _shutdown_event.wait()
+                await _headless_shutdown_event.wait()
             except (asyncio.CancelledError, KeyboardInterrupt):
                 pass
             finally:
-                # Clean up serial connection
                 if protocol.transport and not protocol.transport.is_closing():
                     print("  Closing serial port...")
                     try:
@@ -2455,18 +2453,18 @@ async def main():
                     except Exception:
                         pass
                     protocol.transport.close()
-                # Clean up TCP server
-                if TCP.tcpserver is not None:
-                    try:
-                        TCP.tcpserver.close()
-                    except Exception:
-                        pass
                 if TCP.tcpserver_server is not None:
                     try:
                         TCP.tcpserver_server.close()
+                        await TCP.tcpserver_server.wait_closed()
                     except Exception:
                         pass
                 TCP.tcpserver_ready = False
+                tcp_task.cancel()
+                try:
+                    await tcp_task
+                except (asyncio.CancelledError, Exception):
+                    pass
                 print("  Headless server shut down cleanly.")
             return  # Skip GUI path below
         else:
@@ -2531,5 +2529,25 @@ async def main():
         if radio.dpg_enabled == True:
             dpg.destroy_context()
 
+_headless_shutdown_event = None  # set by main() once the loop binds it
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Headless mode runs on the module-level `loop` (started at import by the
+    # background thread at line 72). asyncio.run() would create a second loop
+    # and leave the TCP server + signal handler straddling two event loops,
+    # which is the exact bug that caused the 10 s SIGKILL hang on systemd stop.
+    if any(a in sys.argv for a in ("-s", "--start-server")):
+        import signal as _signal
+        def _shutdown(_signum, _frame):
+            print("\nSIGTERM received — shutting down...")
+            if _headless_shutdown_event is not None:
+                loop.call_soon_threadsafe(_headless_shutdown_event.set)
+        _signal.signal(_signal.SIGTERM, _shutdown)
+        _signal.signal(_signal.SIGINT, _shutdown)
+        fut = asyncio.run_coroutine_threadsafe(main(), loop)
+        try:
+            fut.result()
+        except KeyboardInterrupt:
+            pass
+    else:
+        asyncio.run(main())
